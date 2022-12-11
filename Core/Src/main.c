@@ -57,7 +57,7 @@ UART_HandleTypeDef huart2;
 /* USER CODE BEGIN PV */
 uint32_t dataC[lengthSoftPWMbuffer];
 uint16_t duty_down=0;
-uint32_t duty=0;
+uint16_t duty=0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -81,6 +81,7 @@ int8_t rslt;
 char hum_string[50];
 char temp_string[50];
 char press_string[50];
+char duty_string[50];
 
 int8_t user_i2c_read(uint8_t id, uint8_t reg_addr, uint8_t *data, uint16_t len)
 {
@@ -196,7 +197,7 @@ int main(void)
 
   /* DMA init (SoftPWM) */
   HAL_TIM_Base_Start(&htim1);
-  HAL_TIM_Base_Start(&htim2);
+  HAL_TIM_Base_Start_IT(&htim2);
   HAL_DMA_Start(&hdma_tim1_up, 	(uint32_t)&(dataC[0]), (uint32_t)&(GPIOC->BSRR), sizeof(dataC)/sizeof(dataC[0]));
   __HAL_TIM_ENABLE_DMA(&htim1, TIM_DMA_UPDATE);
   zeroSoftPWM(dataC);
@@ -234,9 +235,9 @@ int main(void)
 		SSD1306_Puts (press_string, &Font_11x18, 1);
 		SSD1306_UpdateScreen();
 	}
-
-	HAL_Delay(500);
+	HAL_Delay(100);
     /* USER CODE END WHILE */
+
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -380,11 +381,11 @@ static void MX_TIM2_Init(void)
 
   /* USER CODE END TIM2_Init 1 */
   htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 0;
+  htim2.Init.Prescaler = 6000-1;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 65535;
+  htim2.Init.Period = 12-1;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
   {
     Error_Handler();
@@ -520,7 +521,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
 	if (htim == &htim2)
 	{
+	 	duty=(-100*temperature/3)+(2500/3);	// set PWM duty cycle to <0; 100> for temp <22; 25>
 		setSoftPWM(GPIO_PIN_13, duty, (uint32_t*)&dataC);
+		/*
 		if (duty_down==0)
 		{
 			duty++;
@@ -537,6 +540,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		{
 			duty_down=0;
 		}
+		*/
 	}
 }
 /* USER CODE END 4 */
