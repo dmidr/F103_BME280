@@ -48,6 +48,7 @@
 I2C_HandleTypeDef hi2c1;
 
 TIM_HandleTypeDef htim1;
+TIM_HandleTypeDef htim2;
 DMA_HandleTypeDef hdma_tim1_up;
 
 UART_HandleTypeDef huart1;
@@ -56,6 +57,7 @@ UART_HandleTypeDef huart2;
 /* USER CODE BEGIN PV */
 uint32_t dataC[lengthSoftPWMbuffer];
 uint16_t duty_down=0;
+uint32_t duty=0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -66,6 +68,7 @@ static void MX_I2C1_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_TIM1_Init(void);
+static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
 float temperature;
 float humidity;
@@ -169,6 +172,7 @@ int main(void)
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
   MX_TIM1_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
 
   /* OLED init */
@@ -192,9 +196,9 @@ int main(void)
 
   /* DMA init (SoftPWM) */
   HAL_TIM_Base_Start(&htim1);
+  HAL_TIM_Base_Start(&htim2);
   HAL_DMA_Start(&hdma_tim1_up, 	(uint32_t)&(dataC[0]), (uint32_t)&(GPIOC->BSRR), sizeof(dataC)/sizeof(dataC[0]));
   __HAL_TIM_ENABLE_DMA(&htim1, TIM_DMA_UPDATE);
-  uint32_t duty=0;
   zeroSoftPWM(dataC);
   /* USER CODE END 2 */
 
@@ -202,7 +206,6 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    /* USER CODE END WHILE */
 	/* Forced mode setting, switched to SLEEP mode after measurement */
 	rslt = bme280_set_sensor_mode(BME280_FORCED_MODE, &dev);
 	dev.delay_ms(40);
@@ -231,26 +234,9 @@ int main(void)
 		SSD1306_Puts (press_string, &Font_11x18, 1);
 		SSD1306_UpdateScreen();
 	}
-	/*
-	setSoftPWM(GPIO_PIN_13, duty, (uint32_t*)&dataC);
-	if (duty_down==0)
-	{
-		duty++;
-	}
-	else
-	{
-		duty--;
-	}
-	if(duty>100)
-	{
-		duty_down=1;
-	}
-	else if(duty<1)
-	{
-		duty_down=0;
-	}
-	*/
+
 	HAL_Delay(500);
+    /* USER CODE END WHILE */
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -376,6 +362,51 @@ static void MX_TIM1_Init(void)
 }
 
 /**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 0;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 65535;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
+
+}
+
+/**
   * @brief USART1 Initialization Function
   * @param None
   * @retval None
@@ -487,9 +518,25 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-	if (htim == &htim1)
+	if (htim == &htim2)
 	{
-		HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+		setSoftPWM(GPIO_PIN_13, duty, (uint32_t*)&dataC);
+		if (duty_down==0)
+		{
+			duty++;
+		}
+		else
+		{
+			duty--;
+		}
+		if(duty>100)
+		{
+			duty_down=1;
+		}
+		else if(duty<1)
+		{
+			duty_down=0;
+		}
 	}
 }
 /* USER CODE END 4 */
