@@ -21,9 +21,12 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <stdio.h>
+#include <string.h>
 #include "ssd1306.h"
 #include "fonts.h"
 #include "test.h"
+#include "bme280.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -64,6 +67,44 @@ static void MX_USART1_UART_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_TIM1_Init(void);
 /* USER CODE BEGIN PFP */
+float temperature;
+float humidity;
+float pressure;
+
+struct bme280_dev dev;
+struct bme280_data comp_data;
+int8_t rslt;
+
+char hum_string[50];
+char temp_string[50];
+char press_string[50];
+
+int8_t user_i2c_read(uint8_t id, uint8_t reg_addr, uint8_t *data, uint16_t len)
+{
+  if(HAL_I2C_Master_Transmit(&hi2c1, (id << 1), &reg_addr, 1, 10) != HAL_OK) return -1;
+  if(HAL_I2C_Master_Receive(&hi2c1, (id << 1) | 0x01, data, len, 10) != HAL_OK) return -1;
+
+  return 0;
+}
+
+void user_delay_ms(uint32_t period)
+{
+  HAL_Delay(period);
+}
+
+int8_t user_i2c_write(uint8_t id, uint8_t reg_addr, uint8_t *data, uint16_t len)
+{
+  int8_t *buf;
+  buf = malloc(len +1);
+  buf[0] = reg_addr;
+  memcpy(buf +1, data, len);
+
+  if(HAL_I2C_Master_Transmit(&hi2c1, (id << 1), (uint8_t*)buf, len + 1, HAL_MAX_DELAY) != HAL_OK) return -1;
+
+  free(buf);
+  return 0;
+}
+
 void zeroSoftPWM(uint32_t softpwmbuffer[])
 {
 	for (uint32_t i = 0;  i < lengthSoftPWMbuffer; ++ i)
@@ -119,7 +160,6 @@ int main(void)
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
-  SSD1306_Init();
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
@@ -130,15 +170,31 @@ int main(void)
   MX_USART2_UART_Init();
   MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
-  SSD1306_GotoXY(10,10);
-  SSD1306_Puts ("init", &Font_11x18, 1);
-  SSD1306_UpdateScreen();
-  HAL_Delay(500);
+
+  /* OLED init */
+  SSD1306_Init();
+
+  /* BME280 init */
+  dev.dev_id = BME280_I2C_ADDR_PRIM;
+  dev.intf = BME280_I2C_INTF;
+  dev.read = user_i2c_read;
+  dev.write = user_i2c_write;
+  dev.delay_ms = user_delay_ms;
+
+  rslt = bme280_init(&dev);
+
+  /* BME280 settings */
+  dev.settings.osr_h = BME280_OVERSAMPLING_1X;
+  dev.settings.osr_p = BME280_OVERSAMPLING_16X;
+  dev.settings.osr_t = BME280_OVERSAMPLING_2X;
+  dev.settings.filter = BME280_FILTER_COEFF_16;
+  rslt = bme280_set_sensor_settings(BME280_OSR_PRESS_SEL | BME280_OSR_TEMP_SEL | BME280_OSR_HUM_SEL | BME280_FILTER_SEL, &dev);
+
+  /* DMA init (SoftPWM) */
   HAL_TIM_Base_Start(&htim1);
   HAL_DMA_Start(&hdma_tim1_up, 	(uint32_t)&(dataC[0]), (uint32_t)&(GPIOC->BSRR), sizeof(dataC)/sizeof(dataC[0]));
   __HAL_TIM_ENABLE_DMA(&htim1, TIM_DMA_UPDATE);
   uint32_t duty=0;
-
   zeroSoftPWM(dataC);
   /* USER CODE END 2 */
 
@@ -147,24 +203,54 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-	  setSoftPWM(GPIO_PIN_13, duty, (uint32_t*)&dataC);
-	  if (duty_down==0)
-	  {
-		  duty++;
-	  }
-	  else
-	  {
-		  duty--;
-	  }
-	  if(duty>100)
-	  {
-		  duty_down=1;
-	  }
-	  else if(duty<1)
-	  {
-		  duty_down=0;
-	  }
-	  HAL_Delay(10);
+	/* Forced mode setting, switched to SLEEP mode after measurement */
+	rslt = bme280_set_sensor_mode(BME280_FORCED_MODE, &dev);
+	dev.delay_ms(40);
+	/*Get Data */
+	rslt = bme280_get_sensor_data(BME280_ALL, &comp_data, &dev);
+	if(rslt == BME280_OK)
+	{
+		temperature = comp_data.temperature / 100.0;
+		humidity = comp_data.humidity / 1024.0;
+		pressure = comp_data.pressure / 10000.0;
+
+		/*Display Data */
+		memset(hum_string, 0, sizeof(hum_string));
+		memset(temp_string, 0, sizeof(temp_string));
+		memset(press_string, 0, sizeof(press_string));
+
+		sprintf(hum_string, "H:%03.1f %% ", humidity);
+		sprintf(temp_string, "T:%03.1f C ", temperature);
+		sprintf(press_string, "P:%03.1f hPa ", pressure);
+
+		SSD1306_GotoXY (0, 0);
+		SSD1306_Puts (hum_string, &Font_11x18, 1);
+		SSD1306_GotoXY (0, 20);
+		SSD1306_Puts (temp_string, &Font_11x18, 1);
+		SSD1306_GotoXY (0, 40);
+		SSD1306_Puts (press_string, &Font_11x18, 1);
+		SSD1306_UpdateScreen();
+	}
+	/*
+	setSoftPWM(GPIO_PIN_13, duty, (uint32_t*)&dataC);
+	if (duty_down==0)
+	{
+		duty++;
+	}
+	else
+	{
+		duty--;
+	}
+	if(duty>100)
+	{
+		duty_down=1;
+	}
+	else if(duty<1)
+	{
+		duty_down=0;
+	}
+	*/
+	HAL_Delay(500);
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -399,7 +485,13 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+	if (htim == &htim1)
+	{
+		HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+	}
+}
 /* USER CODE END 4 */
 
 /**
